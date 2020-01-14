@@ -144,7 +144,12 @@ func HandlerFor(reg prometheus.Gatherer, opts HandlerOpts) http.Handler {
 			}
 		}
 
-		contentType := expfmt.Negotiate(req.Header)
+		var contentType expfmt.Format
+		if opts.EnableOpenMetrics {
+			contentType = expfmt.Negotiate(req.Header)
+		} else {
+			contentType = expfmt.Negotiate(req.Header, expfmt.FmtOpenMetrics)
+		}
 		header := rsp.Header()
 		header.Set(contentTypeHeader, string(contentType))
 
@@ -168,6 +173,25 @@ func HandlerFor(reg prometheus.Gatherer, opts HandlerOpts) http.Handler {
 				lastErr = err
 				if opts.ErrorLog != nil {
 					opts.ErrorLog.Println("error encoding and sending metric family:", err)
+				}
+				errCnt.WithLabelValues("encoding").Inc()
+				switch opts.ErrorHandling {
+				case PanicOnError:
+					panic(err)
+				case ContinueOnError:
+					// Handled later.
+				case HTTPErrorOnError:
+					httpError(rsp, err)
+					return
+				}
+			}
+		}
+		// expfmt.FmtOpenMetrics is special as it needs a terminating `# EOF` line.
+		if contentType == expfmt.FmtOpenMetrics {
+			if _, err := w.Write([]byte("# EOF\n")); err != nil {
+				lastErr = err
+				if opts.ErrorLog != nil {
+					opts.ErrorLog.Println("error finalizing OpenMetrics data:", err)
 				}
 				errCnt.WithLabelValues("encoding").Inc()
 				switch opts.ErrorHandling {
@@ -318,6 +342,16 @@ type HandlerOpts struct {
 	// away). Until the implementation is improved, it is recommended to
 	// implement a separate timeout in potentially slow Collectors.
 	Timeout time.Duration
+	// If true, OpenMetrics will be accepted during content
+	// negotiation. Note that Prometheus 2.5.0+ will try to negotiate
+	// OpenMetrics as first priority. If OpenMetrics is negotiated, a few
+	// subtle things change: The values of "quantile" labels of Summaries
+	// and "le" labels of Histograms will have a trailing ".0" if they would
+	// otherwise look like integer numbers. There are other changes in the
+	// format, but they don't result in a different result after ingestion
+	// on the Prometheus server. OpenMetrics is the only way to transmit
+	// exemplars.
+	EnableOpenMetrics bool
 }
 
 // gzipAccepted returns whether the client will accept gzip-encoded content.

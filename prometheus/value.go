@@ -16,6 +16,8 @@ package prometheus
 import (
 	"fmt"
 	"sort"
+	"time"
+	"unicode/utf8"
 
 	"github.com/golang/protobuf/proto"
 
@@ -69,7 +71,7 @@ func (v *valueFunc) Desc() *Desc {
 }
 
 func (v *valueFunc) Write(out *dto.Metric) error {
-	return populateMetric(v.valType, v.function(), v.labelPairs, out)
+	return populateMetric(v.valType, v.function(), v.labelPairs, nil, out)
 }
 
 // NewConstMetric returns a metric with one fixed value that cannot be
@@ -116,19 +118,20 @@ func (m *constMetric) Desc() *Desc {
 }
 
 func (m *constMetric) Write(out *dto.Metric) error {
-	return populateMetric(m.valType, m.val, m.labelPairs, out)
+	return populateMetric(m.valType, m.val, m.labelPairs, nil, out)
 }
 
 func populateMetric(
 	t ValueType,
 	v float64,
 	labelPairs []*dto.LabelPair,
+	e *dto.Exemplar,
 	m *dto.Metric,
 ) error {
 	m.Label = labelPairs
 	switch t {
 	case CounterValue:
-		m.Counter = &dto.Counter{Value: proto.Float64(v)}
+		m.Counter = &dto.Counter{Value: proto.Float64(v), Exemplar: e}
 	case GaugeValue:
 		m.Gauge = &dto.Gauge{Value: proto.Float64(v)}
 	case UntypedValue:
@@ -159,4 +162,32 @@ func makeLabelPairs(desc *Desc, labelValues []string) []*dto.LabelPair {
 	labelPairs = append(labelPairs, desc.constLabelPairs...)
 	sort.Sort(labelPairSorter(labelPairs))
 	return labelPairs
+}
+
+// newExemplar creates a new dto.Exemplar from the provided values. An error is
+// returned if any of the label names or values are invalid. If no labels are
+// provided at all, the function returns (nil, nil), i.e. there won't be
+// exemplars without any labels.
+func newExemplar(value float64, ts time.Time, l Labels) (*dto.Exemplar, error) {
+	if len(l) == 0 {
+		return nil, nil
+	}
+	e := &dto.Exemplar{}
+	e.Value = proto.Float64(value)
+	e.Timestamp = proto.Float64(float64(ts.UnixNano()) / 1e9)
+	labelPairs := make([]*dto.LabelPair, 0, len(l))
+	for name, value := range l {
+		if !checkLabelName(name) {
+			return nil, fmt.Errorf("exemplar label name %q is invalid", name)
+		}
+		if !utf8.ValidString(value) {
+			return nil, fmt.Errorf("exemplar label value %q is not valid UTF-8", value)
+		}
+		labelPairs = append(labelPairs, &dto.LabelPair{
+			Name:  proto.String(name),
+			Value: proto.String(value),
+		})
+	}
+	e.Label = labelPairs
+	return e, nil
 }
