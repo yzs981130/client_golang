@@ -162,6 +162,12 @@ func TestAPIs(t *testing.T) {
 		}
 	}
 
+	doQueryRaw := func(q string, ts time.Time) func() (interface{}, Warnings, error) {
+		return func() (interface{}, Warnings, error) {
+			return promAPI.QueryRaw(context.Background(), q, ts)
+		}
+	}
+
 	doQueryRange := func(q string, rng Range) func() (interface{}, Warnings, error) {
 		return func() (interface{}, Warnings, error) {
 			return promAPI.QueryRange(context.Background(), q, rng)
@@ -223,6 +229,24 @@ func TestAPIs(t *testing.T) {
 				Value:     2,
 				Timestamp: model.TimeFromUnix(testTime.Unix()),
 			},
+		},
+		{
+			do: doQueryRaw("2", testTime),
+			inRes: &queryResult{
+				Type: model.ValScalar,
+				Result: &model.Scalar{
+					Value:     2,
+					Timestamp: model.TimeFromUnix(testTime.Unix()),
+				},
+			},
+
+			reqMethod: "POST",
+			reqPath:   "/api/v1/query",
+			reqParam: url.Values{
+				"query": []string{"2"},
+				"time":  []string{testTime.Format(time.RFC3339Nano)},
+			},
+			res: []byte("{\"resultType\":\"scalar\",\"result\":[" + model.TimeFromUnix(testTime.Unix()).String() + ",\"2\"]}"),
 		},
 		{
 			do:    doQuery("2", testTime),
