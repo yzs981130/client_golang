@@ -235,6 +235,8 @@ type API interface {
 	LabelValues(ctx context.Context, label string) (model.LabelValues, Warnings, error)
 	// Query performs a query for the given time.
 	Query(ctx context.Context, query string, ts time.Time) (model.Value, Warnings, error)
+	// QueryRaw performs a query for the given time and returns json raw in []byte.
+	QueryRaw(ctx context.Context, query string, ts time.Time) ([]byte, Warnings, error)
 	// QueryRange performs a query for the given range.
 	QueryRange(ctx context.Context, query string, r Range) (model.Value, Warnings, error)
 	// Series finds series by label matchers.
@@ -676,6 +678,24 @@ func (h *httpAPI) Query(ctx context.Context, query string, ts time.Time) (model.
 	return model.Value(qres.v), warnings, json.Unmarshal(body, &qres)
 }
 
+func (h *httpAPI) QueryRaw(ctx context.Context, query string, ts time.Time) ([]byte, Warnings, error) {
+	u := h.client.URL(epQuery, nil)
+	q := u.Query()
+
+	q.Set("query", query)
+	if !ts.IsZero() {
+		q.Set("time", formatTime(ts))
+	}
+
+	_, body, warnings, err := h.client.DoGetFallback(ctx, u, q)
+	if err != nil {
+		return nil, warnings, err
+	}
+
+	var qres queryResult
+	return body, warnings, json.Unmarshal(body, &qres)
+}
+
 func (h *httpAPI) QueryRange(ctx context.Context, query string, r Range) (model.Value, Warnings, error) {
 	u := h.client.URL(epQueryRange, nil)
 	q := u.Query()
@@ -918,3 +938,4 @@ func (h *apiClientImpl) DoGetFallback(ctx context.Context, u *url.URL, args url.
 func formatTime(t time.Time) string {
 	return strconv.FormatFloat(float64(t.Unix())+float64(t.Nanosecond())/1e9, 'f', -1, 64)
 }
+
