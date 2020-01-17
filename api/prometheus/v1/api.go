@@ -938,4 +938,3 @@ func (h *apiClientImpl) DoGetFallback(ctx context.Context, u *url.URL, args url.
 func formatTime(t time.Time) string {
 	return strconv.FormatFloat(float64(t.Unix())+float64(t.Nanosecond())/1e9, 'f', -1, 64)
 }
-
